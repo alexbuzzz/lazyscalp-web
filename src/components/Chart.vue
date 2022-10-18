@@ -1,24 +1,11 @@
 <script setup>
-import {
-  ref,
-  onMounted,
-  onUnmounted,
-  watch,
-  defineExpose,
-  defineProps
-} from 'vue'
+import { ref, onMounted, onUnmounted, watch, defineProps } from 'vue'
 import { createChart } from 'lightweight-charts'
 import axios from 'axios'
 
 const props = defineProps({
-  ticker: {
-    type: String
-  },
-  interval: {
-    type: String
-  },
-  candlesLimit: {
-    type: Number
+  chartDataParams: {
+    type: Object
   },
   autosize: {
     default: true,
@@ -44,38 +31,27 @@ const props = defineProps({
 let series
 let volume
 let chart
-
-let kline = []
-let vol = []
-
 let connection = null
+let pongInterval = null
+
+const chartData = ref({
+  kline: [],
+  vol: []
+})
 
 const chartContainer = ref()
 
-const fitContent = () => {
-  if (!chart) return
-  chart.timeScale().fitContent()
-}
-
-const getChart = () => {
-  return chart
-}
-
-defineExpose({ fitContent, getChart })
-
-// Get kline from API
-const getKline = async () => {
+const startGettindData = async (tic, int, lim) => {
+  // Get kline from API
   const res = await axios.get(
-    `https://fapi.binance.com/fapi/v1/klines?symbol=${props.ticker.toUpperCase()}&interval=${
-      props.interval
-    }&limit=${props.candlesLimit}`
+    `https://fapi.binance.com/fapi/v1/klines?symbol=${tic.toUpperCase()}&interval=${int}&limit=${lim}`
   )
 
   res.data.forEach((element, index, array) => {
     const date = element[0] / 1000
 
+    // remove last candle to prevent duplicate
     if (index !== array.length - 1) {
-      // remove last candle to prevent duplicate
       const klineFormatted = {
         time: date,
         open: element[1],
@@ -87,25 +63,21 @@ const getKline = async () => {
       const volFormatted = {
         time: date,
         value: element[7],
-        color: 'rgba(50, 50, 61, 0.5)'
+        color: 'rgba(50, 50, 61, 0.8)'
       }
 
-      kline.push(klineFormatted)
-      vol.push(volFormatted)
+      chartData.value.kline.push(klineFormatted)
+      chartData.value.vol.push(volFormatted)
     }
   })
-}
 
-// Draw fresh candles from websocket
-const getLastCandle = () => {
-  const connectionLink = `wss://fstream.binance.com/stream?streams=${props.ticker.toLowerCase()}@kline_${
-    props.interval
-  }`
+  // Draw fresh candles from websocket
+  const connectionLink = `wss://fstream.binance.com/stream?streams=${tic.toLowerCase()}@kline_${int}`
 
   connection = new WebSocket(connectionLink)
 
   connection.onopen = () => {
-    setInterval(() => {
+    pongInterval = setInterval(() => {
       connection.send('pong')
     }, 1000 * 60)
 
@@ -134,12 +106,41 @@ const getLastCandle = () => {
 
         volume.update({
           value: parseFloat(volInCurrency),
-          color: 'rgba(50, 50, 61, 0.5)',
+          color: 'rgba(50, 50, 61, 0.8)',
           time: startTime / 1000
         })
       }
     }
   }
+}
+
+const createChartBody = () => {
+  chart = createChart(chartContainer.value, props.chartOptions)
+
+  // Add properties
+  if (props.priceScaleOptions) {
+    chart.priceScale().applyOptions(props.priceScaleOptions)
+  }
+
+  if (props.timeScaleOptions) {
+    chart.timeScale().applyOptions(props.timeScaleOptions)
+  }
+
+  if (props.autosize) {
+    window.addEventListener('resize', resizeHandler)
+  }
+}
+
+const stopData = () => {
+  connection.close()
+  connection = null
+  clearInterval(pongInterval)
+  chartData.kline = []
+  chartData.vol = []
+
+  chart.removeSeries(series)
+  chart.removeSeries(volume)
+  console.log('ooo')
 }
 
 // Auto resizes the chart when the browser window is resized.
@@ -152,36 +153,28 @@ const resizeHandler = () => {
 // Creates the chart series and sets the data.
 const addSeriesAndData = (props) => {
   series = chart.addCandlestickSeries(props.seriesOptions)
-  series.setData(kline)
+  series.setData(chartData.value.kline)
   volume = chart.addHistogramSeries(props.volumeOptions)
-  volume.setData(vol)
+  volume.setData(chartData.value.vol)
 }
 
 onMounted(async () => {
-  await getKline()
+  await createChartBody()
+  // Get chart data
+  await startGettindData(
+    props.chartDataParams.ticker,
+    '1m',
+    props.chartDataParams.candlesLimit
+  )
 
-  getLastCandle()
-  // Create the Lightweight Charts Instance using the container ref.
-  chart = createChart(chartContainer.value, props.chartOptions)
   addSeriesAndData(props)
 
-  if (props.priceScaleOptions) {
-    chart.priceScale().applyOptions(props.priceScaleOptions)
-  }
-
-  if (props.timeScaleOptions) {
-    chart.timeScale().applyOptions(props.timeScaleOptions)
-  }
-
-  // chart.timeScale().fitContent()
-
-  if (props.autosize) {
-    window.addEventListener('resize', resizeHandler)
-  }
+  setTimeout(() => stopData(), 4000)
 })
 
 onUnmounted(() => {
   connection = null
+  pongInterval = null
 
   if (chart) {
     chart.remove()
@@ -190,9 +183,13 @@ onUnmounted(() => {
   if (series) {
     series = null
   }
+  if (volume) {
+    volume = null
+  }
   window.removeEventListener('resize', resizeHandler)
 })
 
+// WARCHERS
 watch(
   () => props.autosize,
   (enabled) => {
@@ -204,77 +201,50 @@ watch(
   }
 )
 
-watch(
-  () => props.ticker,
-  (newOptions) => {
-    if (!chart) return
-    chart.applyOptions(newOptions)
-  }
-)
+// watch(
+//   () => props.chartDataParams.interval,
+//   async (newData) => {
+//     await startGettindData(
+//       props.chartDataParams.ticker,
+//       newData,
+//       props.chartDataParams.candlesLimit
+//     )
 
-watch(
-  () => props.interval,
-  (newData) => {
-    if (!series) return
-    series.setData(newData)
-  }
-)
+//     updateChartsData()
+//   }
+// )
 
-watch(
-  () => props.interval,
-  (newData) => {
-    if (!volume) return
-    volume.setData(newData)
-  }
-)
+// watch(
+//   () => props.chartOptions,
+//   (newOptions) => {
+//     if (!chart) return
+//     chart.applyOptions(newOptions)
+//   }
+// )
 
-watch(
-  () => props.candlesLimit,
-  (newOptions) => {
-    if (!chart) return
-    chart.applyOptions(newOptions)
-  }
-)
+// watch(
+//   () => props.seriesOptions,
+//   (newOptions) => {
+//     if (!series) return
+//     series.applyOptions(newOptions)
+//   }
+// )
 
-watch(
-  () => props.data,
-  (newData) => {
-    if (!series) return
-    series.setData(newData)
-  }
-)
+// watch(
+//   () => props.priceScaleOptions,
+//   (newOptions) => {
+//     if (!chart) return
+//     chart.priceScale().applyOptions(newOptions)
+//   }
+// )
 
-watch(
-  () => props.chartOptions,
-  (newOptions) => {
-    if (!chart) return
-    chart.applyOptions(newOptions)
-  }
-)
-
-watch(
-  () => props.seriesOptions,
-  (newOptions) => {
-    if (!series) return
-    series.applyOptions(newOptions)
-  }
-)
-
-watch(
-  () => props.priceScaleOptions,
-  (newOptions) => {
-    if (!chart) return
-    chart.priceScale().applyOptions(newOptions)
-  }
-)
-
-watch(
-  () => props.timeScaleOptions,
-  (newOptions) => {
-    if (!chart) return
-    chart.timeScale().applyOptions(newOptions)
-  }
-)
+// watch(
+//   () => props.timeScaleOptions,
+//   (newOptions) => {
+//     if (!chart) return
+//     chart.timeScale().applyOptions(newOptions)
+//   }
+// )
 </script>
 
 <template>

@@ -3,9 +3,14 @@ import { ref } from 'vue'
 import Chart from '../components/Chart.vue'
 import store from '../store'
 
+// Chart data params
+const chartDataParams = ref({
+  ticker: 'BTCUSDT',
+  interval: '1m',
+  candlesLimit: 100
+})
+
 // Chart main settings
-const ticker = 'BTCUSDT'
-let interval = '1m'
 const chartOptions = ref({
   layout: {
     backgroundColor: '#1a1b21',
@@ -57,7 +62,7 @@ const volumeOptions = ref({
   priceLineVisible: false,
   priceScaleId: '',
   scaleMargins: {
-    top: 0.9,
+    top: 0.95,
     bottom: 0.01
   }
 })
@@ -67,10 +72,10 @@ const lwChart = ref()
 
 <template>
   <div class="chart-container">
+    <button @click="chartDataParams.interval = '1m'">1m</button>
+    <button @click="chartDataParams.interval = '5m'">5m</button>
     <Chart
-      :ticker="ticker"
-      :interval="interval"
-      :candlesLimit="100"
+      :chartDataParams="chartDataParams"
       :autosize="true"
       :chart-options="chartOptions"
       :series-options="seriesOptions"
@@ -78,8 +83,6 @@ const lwChart = ref()
       ref="lwChart"
     />
   </div>
-  <button @click="interval = '1m'">1m</button>
-  <button @click="interval = '5m'">5m</button>
 </template>
 
 <style scoped>
