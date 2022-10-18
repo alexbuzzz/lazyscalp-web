@@ -11,13 +11,14 @@ import { createChart } from 'lightweight-charts'
 import axios from 'axios'
 
 const props = defineProps({
-  data: {
-    type: Array,
-    required: true
+  ticker: {
+    type: String
   },
-  vol: {
-    type: Array,
-    required: true
+  interval: {
+    type: String
+  },
+  candlesLimit: {
+    type: Number
   },
   autosize: {
     default: true,
@@ -47,6 +48,8 @@ let chart
 let kline = []
 let vol = []
 
+let connection = null
+
 const chartContainer = ref()
 
 const fitContent = () => {
@@ -63,31 +66,80 @@ defineExpose({ fitContent, getChart })
 // Get kline from API
 const getKline = async () => {
   const res = await axios.get(
-    'https://fapi.binance.com/fapi/v1/klines?symbol=ADAUSDT&interval=1m'
+    `https://fapi.binance.com/fapi/v1/klines?symbol=${props.ticker.toUpperCase()}&interval=${
+      props.interval
+    }&limit=${props.candlesLimit}`
   )
 
-  res.data.forEach((element) => {
+  res.data.forEach((element, index, array) => {
     const date = element[0] / 1000
 
-    // console.log(dateObject.toLocaleString())
+    if (index !== array.length - 1) {
+      // remove last candle to prevent duplicate
+      const klineFormatted = {
+        time: date,
+        open: element[1],
+        high: element[2],
+        low: element[3],
+        close: element[4]
+      }
 
-    const klineFormatted = {
-      time: date,
-      open: element[1],
-      high: element[2],
-      low: element[3],
-      close: element[4]
+      const volFormatted = {
+        time: date,
+        value: element[7],
+        color: 'rgba(50, 50, 61, 0.5)'
+      }
+
+      kline.push(klineFormatted)
+      vol.push(volFormatted)
     }
-
-    const volFormatted = {
-      time: date,
-      value: element[7],
-      color: 'rgba(50, 50, 61, 0.5)'
-    }
-
-    kline.push(klineFormatted)
-    vol.push(volFormatted)
   })
+}
+
+// Draw fresh candles from websocket
+const getLastCandle = () => {
+  const connectionLink = `wss://fstream.binance.com/stream?streams=${props.ticker.toLowerCase()}@kline_${
+    props.interval
+  }`
+
+  connection = new WebSocket(connectionLink)
+
+  connection.onopen = () => {
+    setInterval(() => {
+      connection.send('pong')
+    }, 1000 * 60)
+
+    connection.onmessage = (data) => {
+      const parsedData = JSON.parse(data.data)
+
+      if (parsedData.data !== undefined) {
+        const {
+          k: {
+            T: startTime,
+            o: open,
+            c: close,
+            h: high,
+            l: low,
+            q: volInCurrency
+          }
+        } = parsedData.data
+
+        series.update({
+          open: parseFloat(open),
+          close: parseFloat(close),
+          high: parseFloat(high),
+          low: parseFloat(low),
+          time: startTime / 1000
+        })
+
+        volume.update({
+          value: parseFloat(volInCurrency),
+          color: 'rgba(50, 50, 61, 0.5)',
+          time: startTime / 1000
+        })
+      }
+    }
+  }
 }
 
 // Auto resizes the chart when the browser window is resized.
@@ -107,6 +159,8 @@ const addSeriesAndData = (props) => {
 
 onMounted(async () => {
   await getKline()
+
+  getLastCandle()
   // Create the Lightweight Charts Instance using the container ref.
   chart = createChart(chartContainer.value, props.chartOptions)
   addSeriesAndData(props)
@@ -127,6 +181,8 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  connection = null
+
   if (chart) {
     chart.remove()
     chart = null
@@ -149,12 +205,34 @@ watch(
 )
 
 watch(
-  () => props.type,
-  (newType) => {
-    if (series && chart) {
-      chart.removeSeries(series)
-    }
-    addSeriesAndData(props)
+  () => props.ticker,
+  (newOptions) => {
+    if (!chart) return
+    chart.applyOptions(newOptions)
+  }
+)
+
+watch(
+  () => props.interval,
+  (newData) => {
+    if (!series) return
+    series.setData(newData)
+  }
+)
+
+watch(
+  () => props.interval,
+  (newData) => {
+    if (!volume) return
+    volume.setData(newData)
+  }
+)
+
+watch(
+  () => props.candlesLimit,
+  (newOptions) => {
+    if (!chart) return
+    chart.applyOptions(newOptions)
   }
 )
 
@@ -200,11 +278,11 @@ watch(
 </script>
 
 <template>
-  <div class="mini-chart" ref="chartContainer"></div>
+  <div class="chart" ref="chartContainer"></div>
 </template>
 
 <style scoped>
-.mini-chart {
+.chart {
   height: 100%;
 }
 </style>

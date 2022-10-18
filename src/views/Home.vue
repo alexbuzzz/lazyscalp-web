@@ -1,9 +1,11 @@
 <script setup>
 import { ref } from 'vue'
-import MiniChart from '../components/MiniChart.vue'
+import Chart from '../components/Chart.vue'
 import store from '../store'
 
 // Chart main settings
+const ticker = 'BTCUSDT'
+let interval = '1m'
 const chartOptions = ref({
   layout: {
     backgroundColor: '#1a1b21',
@@ -48,29 +50,27 @@ const seriesOptions = ref({
 
 // Volume settings
 const volumeOptions = ref({
+  entireTextOnly: true,
   priceFormat: {
     type: 'volume'
   },
+  priceLineVisible: false,
   priceScaleId: '',
   scaleMargins: {
-    top: 0.95,
-    bottom: 0
-  },
-  autoScale: false
+    top: 0.9,
+    bottom: 0.01
+  }
 })
 
-// Candlestick data
-const data1 = ref(store.state.klineBinaF.ADAUSDT)
-
-const data2 = ref(store.state.volBinaF.ADAUSDT)
 const lwChart = ref()
 </script>
 
 <template>
   <div class="chart-container">
-    <MiniChart
-      :data="data1"
-      :vol="data2"
+    <Chart
+      :ticker="ticker"
+      :interval="interval"
+      :candlesLimit="100"
       :autosize="true"
       :chart-options="chartOptions"
       :series-options="seriesOptions"
@@ -78,6 +78,8 @@ const lwChart = ref()
       ref="lwChart"
     />
   </div>
+  <button @click="interval = '1m'">1m</button>
+  <button @click="interval = '5m'">5m</button>
 </template>
 
 <style scoped>
